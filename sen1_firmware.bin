@@ -1,0 +1,137 @@
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
+#include <HTTPClient.h>   
+#include <HTTPUpdate.h>   
+
+// --- ตั้งค่า Fix IP ---
+// IPAddress local_ip(192, 168, 1, 161);   
+// IPAddress gateway(192, 168, 1, 1);
+// IPAddress subnet(255, 255, 255, 0);
+// IPAddress primaryDNS(8, 8, 8, 8);
+
+const char* ssid = "KAMDA.";
+const char* password = "12345678";
+
+// --- ตั้งค่า MQTT ---
+const char* mqtt_server = "d5e2a19ac8614b0184643a016bcb97a7.s1.eu.hivemq.cloud"; 
+const int mqtt_port = 8883; 
+const char* mqtt_user = "admin";
+const char* mqtt_pass = "12345678";
+
+const char* mqtt_client_id = "ESP32C6_Sensor_Node1"; 
+const String node_name = "sensor1"; 
+const String status_topic = "farm/status/sensor1"; 
+
+// --- ตั้งค่า OTA Sensor 1 ---
+String currentVersion = "1.1"; 
+const char* version_url = "https://raw.githubusercontent.com/kamdacloud/node_version.txt/refs/heads/main/sensor1_version.txt";
+const char* firmware_url = "https://raw.githubusercontent.com/YourUser/YourRepo/main/sensor1_firmware.bin";
+
+WiFiClientSecure espClient;
+PubSubClient client(espClient);
+unsigned long lastMsg = 0;
+bool sendSensorData = true; 
+
+void checkUpdate() {
+  Serial.println("Starting OTA update check for Sensor 1...");
+  WiFiClientSecure updateClient;
+  updateClient.setInsecure(); 
+  
+  HTTPClient http;
+  http.begin(updateClient, version_url);
+  int httpCode = http.GET();
+  
+  if (httpCode == HTTP_CODE_OK) {
+    String newVersion = http.getString();
+    newVersion.trim(); 
+    
+    if (newVersion != currentVersion && newVersion.length() > 0) {
+      Serial.println("New version found! Starting OTA update...");
+      client.publish(status_topic.c_str(), "updating", true);
+      
+      t_httpUpdate_return ret = httpUpdate.update(updateClient, firmware_url);
+      
+      if(ret == HTTP_UPDATE_FAILED) {
+        client.publish(status_topic.c_str(), "online", true); 
+      }
+    }
+  }
+  http.end();
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  String message = "";
+  for (int i = 0; i < length; i++) message += (char)payload[i];
+
+  // 1. รับคำสั่งเปิด-ปิดการส่งข้อมูล
+  if (String(topic) == "farm/control/sensor1/cmd") {
+    if (message == "STOP") {
+      sendSensorData = false;
+      Serial.println("🛑 หยุดส่งข้อมูลจำลอง");
+    } else if (message == "START") {
+      sendSensorData = true;
+      Serial.println("▶️ เริ่มส่งข้อมูลจำลอง");
+    }
+  }
+  
+  // 2. ดักจับคำสั่ง Force Update จากปุ่ม
+  if (String(topic) == "farm/control/sensor1/update") {
+    if (message == "FORCE") {
+      checkUpdate(); 
+    }
+  }
+}
+
+void reconnect() {
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    if (client.connect(mqtt_client_id, mqtt_user, mqtt_pass, status_topic.c_str(), 0, true, "offline")) {
+      Serial.println(" connected! 🟢");
+      client.publish(status_topic.c_str(), "online", true);
+      client.subscribe("farm/control/sensor1/#"); 
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      delay(5000);
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // สุ่มค่าเริ่มต้น (Seed) เพื่อให้การสุ่มตัวเลขไม่ซ้ำแพทเทิร์นเดิมเมื่อเปิดเครื่องใหม่
+  randomSeed(analogRead(0));
+
+  // WiFi.config(local_ip, gateway, subnet, primaryDNS);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+
+  espClient.setInsecure(); 
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
+}
+
+void loop() {
+  if (!client.connected()) reconnect();
+  client.loop();
+
+  unsigned long now = millis();
+  
+  // ส่งข้อมูลทุกๆ 5 วินาที
+  if (sendSensorData && (now - lastMsg > 1000)) {
+    lastMsg = now;
+
+    // จำลองค่าความชื้นระหว่าง 50.0 ถึง 80.0
+    float h = random(600, 950) / 10.0; 
+    
+    // จำลองค่าอุณหภูมิระหว่าง 25.0 ถึง 35.0
+    float t = random(400, 550) / 10.0; 
+
+    Serial.printf("Mock Sensor -> Temp: %.1f °C, Hum: %.1f %%\n", t, h);
+
+    client.publish("farm/sensor/sensor1/temp", String(t, 1).c_str());
+    client.publish("farm/sensor/sensor1/hum", String(h, 1).c_str());
+  }
+}
