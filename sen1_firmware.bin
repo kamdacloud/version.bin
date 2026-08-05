@@ -24,7 +24,7 @@ const String node_name = "sensor1";
 const String status_topic = "farm/status/sensor1"; 
 
 // --- ตั้งค่า OTA Sensor 1 ---
-String currentVersion = "1.1"; 
+String currentVersion = "1.2"; 
 const char* version_url = "https://raw.githubusercontent.com/kamdacloud/node_version.txt/refs/heads/main/sensor1_version.txt";
 const char* firmware_url = "https://raw.githubusercontent.com/YourUser/YourRepo/main/sensor1_firmware.bin";
 
@@ -127,7 +127,7 @@ void loop() {
     float h = random(600, 950) / 10.0; 
     
     // จำลองค่าอุณหภูมิระหว่าง 25.0 ถึง 35.0
-    float t = random(400, 550) / 10.0; 
+    float t = random(800, 990) / 10.0; 
 
     Serial.printf("Mock Sensor -> Temp: %.1f °C, Hum: %.1f %%\n", t, h);
 
